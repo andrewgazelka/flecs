@@ -133,7 +133,8 @@ void flecs_instantiate_children(
     ecs_entity_t base,
     ecs_entity_t instance,
     ecs_table_t *child_table,
-    const ecs_instantiate_ctx_t *ctx)
+    const ecs_instantiate_ctx_t *ctx,
+    ecs_vec_t *instance_ordered_children)
 {
     if (!ecs_table_count(child_table)) {
         return;
@@ -307,6 +308,14 @@ void flecs_instantiate_children(
     const ecs_entity_t *i_children = flecs_bulk_new(world, i_table, child_ids,
         &diff.added, child_count, component_data, false, &child_row, &diff);
 
+    /* If parent has ordered children, append instance children in order */
+    if (instance_ordered_children) {
+        for (j = 0; j < child_count; j++) {
+            ecs_vec_append_t(&world->allocator, instance_ordered_children,
+                ecs_entity_t)[0] = i_children[j];
+        }
+    }
+
     /* If children are slots, add slot relationships to parent */
     if (slot_of) {
         for (j = 0; j < child_count; j ++) {
@@ -420,18 +429,23 @@ void flecs_instantiate(
     ecs_table_cache_iter_t it;
     if (cr && flecs_table_cache_all_iter((ecs_table_cache_t*)cr, &it)) {
         ecs_os_perf_trace_push("flecs.instantiate");
+
+        /* If base has ordered children, pass instance's ordered_children vector
+         * so children are appended in the correct order as they're instantiated */
+        ecs_vec_t *instance_ordered_children = NULL;
+        ecs_component_record_t *icr = NULL;
+        if (cr->flags & EcsIdOrderedChildren) {
+            icr = flecs_components_get(world, ecs_childof(instance));
+            ecs_assert(icr != NULL, ECS_INTERNAL_ERROR, NULL);
+            instance_ordered_children = &icr->pair->ordered_children;
+        }
+
         const ecs_table_record_t *tr;
         while ((tr = flecs_table_cache_next(&it, ecs_table_record_t))) {
             flecs_instantiate_children(
-                world, base, instance, tr->hdr.table, ctx);
+                world, base, instance, tr->hdr.table, ctx,
+                instance_ordered_children);
         }
         ecs_os_perf_trace_pop("flecs.instantiate");
-
-        if (cr->flags & EcsIdOrderedChildren) {
-            ecs_component_record_t *icr = flecs_components_get(world, ecs_childof(instance));
-            /* If base has children, instance must now have children */
-            ecs_assert(icr != NULL, ECS_INTERNAL_ERROR, NULL);
-            flecs_ordered_children_populate(world, icr);
-        }
     }
 }
