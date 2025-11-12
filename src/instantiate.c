@@ -431,7 +431,71 @@ void flecs_instantiate(
             ecs_component_record_t *icr = flecs_components_get(world, ecs_childof(instance));
             /* If base has children, instance must now have children */
             ecs_assert(icr != NULL, ECS_INTERNAL_ERROR, NULL);
-            flecs_ordered_children_populate(world, icr);
+
+            /* Populate instance's ordered children based on base's order.
+             * Create a mapping of base children to instance children first. */
+            ecs_vec_t *base_v = &cr->pair->ordered_children;
+            ecs_vec_t *inst_v = &icr->pair->ordered_children;
+            ecs_assert(ecs_vec_count(inst_v) == 0, ECS_INTERNAL_ERROR, NULL);
+
+            int32_t base_child_count = ecs_vec_count(base_v);
+            ecs_entity_t *base_children = ecs_vec_first_t(base_v, ecs_entity_t);
+
+            /* Build a map from base child to instance child.
+             * Instance children maintain the same offset from the instance as
+             * base children have from the base (when possible). */
+            ecs_entity_t *child_map = ecs_os_calloc_n(ecs_entity_t, base_child_count);
+
+            /* First, collect all instance children into a temporary array */
+            ecs_entity_t *inst_children_temp = ecs_os_malloc_n(ecs_entity_t, base_child_count);
+            int32_t inst_child_count = 0;
+            int32_t i, j;
+
+            ecs_iter_t inst_child_it = ecs_each_id(world, ecs_childof(instance));
+            while (ecs_each_next(&inst_child_it)) {
+                for (j = 0; j < inst_child_it.count; j++) {
+                    ecs_entity_t inst_child = inst_child_it.entities[j];
+                    if (inst_child_count < base_child_count) {
+                        inst_children_temp[inst_child_count++] = inst_child;
+                    }
+                }
+            }
+
+            /* Try to match by entity ID offset first (stable IDs) */
+            for (i = 0; i < base_child_count && i < inst_child_count; i++) {
+                ecs_entity_t base_child = base_children[i];
+                int64_t offset = (int64_t)base_child - (int64_t)base;
+
+                /* Check if instance child with the same offset exists */
+                ecs_entity_t expected_inst_child = (ecs_entity_t)((int64_t)instance + offset);
+
+                /* Verify this entity exists and is a child of instance */
+                bool found = false;
+                for (j = 0; j < inst_child_count; j++) {
+                    if (inst_children_temp[j] == expected_inst_child) {
+                        child_map[i] = expected_inst_child;
+                        found = true;
+                        break;
+                    }
+                }
+
+                /* If stable ID mapping didn't work, match by position in iteration order */
+                if (!found && i < inst_child_count) {
+                    child_map[i] = inst_children_temp[i];
+                }
+            }
+
+            ecs_os_free(inst_children_temp);
+
+            /* Now add instance children in the same order as base children */
+            for (i = 0; i < base_child_count; i++) {
+                if (child_map[i]) {
+                    ecs_vec_append_t(&world->allocator, inst_v, ecs_entity_t)[0] =
+                        child_map[i];
+                }
+            }
+
+            ecs_os_free(child_map);
         }
     }
 }
