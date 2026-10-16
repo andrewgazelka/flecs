@@ -940,6 +940,7 @@ ecs_world_t *ecs_mini(void) {
     }
 
     ecs_map_init(&world->prefab_child_indices, a);
+    ecs_map_init(&world->external_sources, a);
 
     ecs_set_stage_count(world, 1);
     ecs_default_lookup_path[0] = EcsFlecsCore;
@@ -1142,6 +1143,8 @@ int ecs_fini(
     if (world->binding_ctx_free) {
         world->binding_ctx_free(world->binding_ctx);
     }
+
+    flecs_external_sources_fini(world);
 
     /* After this point no more user code is invoked */
 
